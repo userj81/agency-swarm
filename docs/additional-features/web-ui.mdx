@@ -1,0 +1,417 @@
+---
+title: "Web UI"
+description: "Complete web interface for Agency Swarm with all terminal features."
+icon: "desktop"
+---
+
+## Overview
+
+The Web UI provides a complete web interface for Agency Swarm, porting all terminal features to a modern web application. Built with Next.js, React, TypeScript, and FastAPI.
+
+<Features>
+  <Feature icon="comment" title="Real-time Streaming">
+    Server-Sent Events (SSE) for instant response streaming
+  </Feature>
+  <Feature icon="users" title="Multi-Agent">
+    Agent selector with @agent mention support
+  </Feature>
+  <Feature icon="terminal" title="All Commands">
+    All slash commands from terminal: /help, /new, /compact, /resume, /status, /cost
+  </Feature>
+  <Feature icon="floppy-disk" title="Persistence">
+    Chat history with sidebar and auto-save
+  </Feature>
+  <Feature icon="chart-line" title="Usage Tracking">
+    Token count and cost visualization panel
+  </Feature>
+  <Feature icon="keyboard" title="Keyboard Shortcuts">
+    Ctrl+K for commands, Ctrl+/ for focus, ESC to cancel
+  </Feature>
+</Features>
+
+---
+
+## Quick Start
+
+<Accordion title="Step 1: Install Frontend Dependencies" defaultOpen={false}>
+
+Navigate to the web UI directory and install Node.js dependencies:
+
+```bash
+cd agency-swarm/src/agency_swarm/ui/demos/web
+npm install
+```
+
+<Note>Requires Node.js 18+ and npm or yarn.</Note>
+
+</Accordion>
+
+<Accordion title="Step 2: Install Backend Dependencies" defaultOpen={false}>
+
+Install Python dependencies for the FastAPI backend:
+
+```bash
+cd backend
+pip install -r requirements.txt
+```
+
+</Accordion>
+
+<Accordion title="Step 3: Configure Your Agency" defaultOpen={true}>
+
+Edit `backend/main.py` to configure your agents:
+
+```python
+from agency_swarm import Agency, Agent
+
+def create_agency() -> Agency:
+    ceo = Agent(
+        name="CEO",
+        description="Agency coordinator",
+        instructions="You are the CEO. Coordinate tasks and delegate.",
+        model="gpt-4o-mini",
+    )
+
+    developer = Agent(
+        name="Developer",
+        description="Code and technical tasks",
+        instructions="You are a Developer. Write code and solve problems.",
+        model="gpt-4o-mini",
+    )
+
+    return Agency(
+        agents=[ceo, developer],
+        default_agent=ceo,
+        shared_instructions="You are part of an AI agency.",
+    )
+```
+
+</Accordion>
+
+<Accordion title="Step 4: Run the Backend" defaultOpen={false}>
+
+Start the FastAPI server:
+
+```bash
+cd backend
+python main.py
+```
+
+The backend will run on `http://localhost:8000`
+
+</Accordion>
+
+<Accordion title="Step 5: Run the Frontend" defaultOpen={false}>
+
+In a new terminal, start the Next.js development server:
+
+```bash
+npm run dev
+```
+
+The UI will be available at `http://localhost:3000`
+
+</Accordion>
+
+---
+
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                     Next.js Frontend                         │
+│  React + TypeScript + Tailwind CSS                          │
+├─────────────────────────────────────────────────────────────┤
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │ Chat UI     │  │ Sidebar     │  │ Commands    │        │
+│  └─────────────┘  └─────────────┘  └─────────────┘        │
+└─────────────────────────────────────────────────────────────┘
+                              ↓ HTTP/SSE
+┌─────────────────────────────────────────────────────────────┐
+│                    Python Backend (FastAPI)                  │
+├─────────────────────────────────────────────────────────────┤
+│              Agency Swarm Integration                        │
+│  - Multi-agent orchestration                                │
+│  - Streaming responses                                      │
+│  - Chat persistence                                         │
+│  - Usage tracking                                           │
+└─────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Features
+
+### Real-Time Streaming
+
+The Web UI uses Server-Sent Events (SSE) to stream responses in real-time, just like the terminal interface.
+
+### Multi-Agent Communication
+
+- **Agent Selector**: Dropdown to choose which agent to message
+- **@agent Syntax**: Type `@agentname` in the chat to mention a specific agent
+- **Handoffs**: Agents can transfer conversations to each other
+
+### Slash Commands
+
+All terminal commands are available:
+
+| Command | Description |
+|---------|-------------|
+| `/help` | Show available commands |
+| `/new` | Start a new chat session |
+| `/compact [instructions]` | Summarize and continue conversation |
+| `/resume [chat_id]` | Resume a previous conversation |
+| `/status` | Show agency status and setup |
+| `/cost` | Display usage and costs |
+
+Press `Ctrl+K` to open the command palette.
+
+### Chat Persistence
+
+- **Auto-save**: Chats are saved after each message
+- **Sidebar**: View all saved conversations
+- **Metadata**: Each chat has summary, timestamps, and usage info
+- **Resume**: Easily continue previous conversations
+
+### Usage Tracking
+
+Press the cost button (or use `/cost`) to see:
+
+- Total tokens (input, output, cached)
+- Request count
+- Total cost in USD
+- Token distribution chart
+
+---
+
+## Keyboard Shortcuts
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Shortcut</TableHead>
+      <TableHead>Action</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Ctrl+K</TableCell>
+      <TableCell>Open command palette</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Ctrl+/</TableCell>
+      <TableCell>Focus chat input</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Enter</TableCell>
+      <TableCell>Send message</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Shift+Enter</TableCell>
+      <TableCell>New line in input</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>ESC</TableCell>
+      <TableCell>Cancel streaming / Close modals</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+---
+
+## API Endpoints
+
+The FastAPI backend provides the following endpoints:
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Method</TableHead>
+      <TableHead>Endpoint</TableHead>
+      <TableHead>Description</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>GET</TableCell>
+      <TableCell>/health</TableCell>
+      <TableCell>Health check</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>GET</TableCell>
+      <TableCell>/agents</TableCell>
+      <TableCell>List all agents</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>POST</TableCell>
+      <TableCell>/chat</TableCell>
+      <TableCell>Send message (SSE stream)</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>POST</TableCell>
+      <TableCell>/command</TableCell>
+      <TableCell>Execute slash command</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>GET</TableCell>
+      <TableCell>/chats</TableCell>
+      <TableCell>List all chats</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>POST</TableCell>
+      <TableCell>/chats/new</TableCell>
+      <TableCell>Create new chat</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>GET</TableCell>
+      <TableCell>/chats/{id}</TableCell>
+      <TableCell>Get chat details</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>POST</TableCell>
+      <TableCell>/chats/{id}/resume</TableCell>
+      <TableCell>Resume chat</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>DELETE</TableCell>
+      <TableCell>/chats/{id}</TableCell>
+      <TableCell>Delete chat</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+---
+
+## Environment Variables
+
+Create a `.env.local` file in the web directory:
+
+```bash
+# Python Backend URL
+PYTHON_BACKEND_URL=http://localhost:8000
+
+# Optional: Custom chats directory
+# AGENCY_SWARM_CHATS_DIR=./chats
+```
+
+---
+
+## Project Structure
+
+```
+web/
+├── app/                    # Next.js App Router
+│   ├── api/               # API routes (proxy to Python)
+│   ├── globals.css        # Global styles
+│   ├── layout.tsx         # Root layout
+│   └── page.tsx           # Main chat page
+├── components/            # React components
+│   ├── ChatContainer.tsx  # Message display
+│   ├── InputArea.tsx      # Chat input
+│   ├── Sidebar.tsx        # Chat history
+│   ├── CommandMenu.tsx    # Command palette
+│   ├── UsagePanel.tsx     # Cost/token stats
+│   └── AgentSelector.tsx  # Agent dropdown
+├── hooks/                 # Custom React hooks
+│   ├── useChat.ts         # Chat state & streaming
+│   └── useChats.ts        # Chat list & persistence
+├── backend/               # Python FastAPI server
+│   ├── main.py            # Agency Swarm integration
+│   └── requirements.txt   # Python dependencies
+├── types/                 # TypeScript types
+├── utils/                 # Utility functions
+├── package.json           # Node.js dependencies
+└── README.md              # Documentation
+```
+
+---
+
+## Deployment
+
+### Frontend (Vercel)
+
+<Note>Set PYTHON_BACKEND_URL to your deployed backend URL.</Note>
+
+```bash
+npm run build
+vercel deploy
+```
+
+### Backend (Render, Railway, etc.)
+
+Deploy the FastAPI backend and configure CORS for your frontend domain.
+
+---
+
+## Terminal vs Web UI
+
+<Table>
+  <TableHeader>
+    <TableRow>
+      <TableHead>Feature</TableHead>
+      <TableHead>Terminal</TableHead>
+      <TableHead>Web UI</TableHead>
+    </TableRow>
+  </TableHeader>
+  <TableBody>
+    <TableRow>
+      <TableCell>Chat streaming</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅ SSE</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>@agent mention</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Slash commands</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Hot reload</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅ Next.js</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Autocomplete</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅ Command palette</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Cancel (ESC)</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Reasoning toggle</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅ In chat</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Usage display</TableCell>
+      <TableCell>/cost</TableCell>
+      <TableCell>✅ Panel</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Resume chat</TableCell>
+      <TableCell>✅</TableCell>
+      <TableCell>✅ Sidebar</TableCell>
+    </TableRow>
+    <TableRow>
+      <TableCell>Rich output</TableCell>
+      <TableCell>Rich terminal</TableCell>
+      <TableCell>Modern web UI</TableCell>
+    </TableRow>
+  </TableBody>
+</Table>
+
+---
+
+## See Also
+
+- [FastAPI Integration](./fastapi-integration) - Learn more about FastAPI integration
+- [Deployment to Production](./deployment-to-production) - Deploy your agency to production
+- [Streaming](./streaming) - Understanding streaming responses
