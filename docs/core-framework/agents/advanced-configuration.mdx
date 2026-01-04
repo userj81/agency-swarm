@@ -1,0 +1,49 @@
+---
+title: "Advanced Configuration"
+description: "Learn advanced configuration options for your agents in Agency Swarm."
+icon: "gears"
+---
+
+
+All parameters inside the `Agent` class follow the same structure as the OpenAI Agents SDK [`Agent`](https://openai.github.io/openai-agents-python/ref/agent/#agents.agent.Agent). However, there are a few advanced parameters that require more explanation.
+
+### Parallel Tool Calls
+
+Controls whether tools execute in parallel or sequentially for a given agent.
+
+```python
+from agency_swarm import Agent, ModelSettings
+
+agent = Agent(
+    name="MyAgent",
+    instructions="...",
+    model_settings=ModelSettings(parallel_tool_calls=False),
+)
+```
+
+To force sequential execution for a specific tool regardless of that setting, set `one_call_at_a_time = True` in the tool’s `ToolConfig`. See [Advanced Tool Configuration](/core-framework/tools/custom-tools/configuration).
+
+### File Search
+
+If your `files_folder` ends with `_vs_<vector_store_id>`, Agency Swarm automatically associates files with that Vector Store and adds `FileSearchTool` to the Agent. The `include_search_results` behavior can be toggled via the Agent’s `include_search_results` flag.
+
+### Output Validation
+
+Use `output_guardrails` on the `Agent` to validate outputs. See the detailed guide: [Guardrails](/additional-features/guardrails).
+
+### Few‑Shot Examples
+
+Few‑shot examples are supported and appended to `instructions` at initialization. The format follows the [message object format](https://platform.openai.com/docs/api-reference/messages/createMessage).
+
+```python
+from agency_swarm import Agent
+
+examples = [
+    {"role": "user", "content": "Hi!"},
+    {"role": "assistant", "content": "Hello!"},
+]
+
+agent = Agent(name="MyAgent", examples=examples)
+```
+
+See also: [Few‑Shot Examples](/additional-features/few-shot-examples).

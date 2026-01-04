@@ -1,0 +1,330 @@
+---
+title: "FastAPI Integration"
+description: "Serving your agencies and tools as APIs with FastAPI."
+icon: "server"
+---
+
+Agency Swarm supports serving your agencies and tools as production-ready HTTP APIs using [FastAPI](https://fastapi.tiangolo.com/). This enables you to interact with your agents and tools over HTTP, integrate with other services, or connect it to web frontends.
+
+## Installation
+
+FastAPI integration is an **optional installation**. To install all required dependencies, run:
+
+```bash
+pip install "agency-swarm[fastapi]"
+```
+
+## Setting Up FastAPI Endpoints
+
+You can expose your agencies and tools as API endpoints using the `run_fastapi()` function.
+
+### Example: Create an API endpoint for a single agency
+
+```python
+from agency_swarm import Agency, Agent
+
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant."
+)
+
+agency = Agency(agent, name="test_agency")
+
+agency.run_fastapi()
+```
+
+Optionally, you can specify following parameters:
+- host (default: `"0.0.0.0"`)
+- port (default: `8000`)
+- app_token_env (default: `"APP_TOKEN"`) - Name of the env variable storing app token.
+- return_app (default: False) - If True, will return the FastAPI instead of running the server
+- cors_origins: (default: ["*"])
+- enable_agui (default: `False`) - Enable AG-UI protocol compatibility for streaming endpoints
+- enable_logging (default: `False`) - Enable request tracking and expose `/get_logs` endpoint
+- logs_dir (default: `"activity-logs"`) - Directory for log files when logging is enabled
+
+This will create 4 endpoints for the agency:
+- `/test_agency/get_response`
+- `/test_agency/get_response_stream`
+- `/test_agency/cancel_response_stream`
+- `/test_agency/get_metadata`
+
+If `enable_logging=True`, a `/get_logs` endpoint is also added.
+
+Both of these endpoints will accept following input parameters:
+
+```python
+message: str
+# Entire chat history as a flat list of messages with metadata like 'agent', 'callerAgent' and 'timestamp'
+chat_history: list[dict[str, Any]] = None
+recipient_agent: str = None
+file_ids: list[str] = None
+# Files to download and attach to the agent. Should be provided in a form of a mapping: {"filename_1":"url", "filename_2":"url", ...}
+file_urls: dict[str, str] = None
+additional_instructions: str = None
+user_context: dict[str, Any] = None  # Per-request context accessible via Agency Context
+```
+
+`user_context` passes structured data to [Agency Context](/additional-features/agency-context) without exposing it to the LLM. It merges with any `user_context` set on the agency instance.
+
+Responses include a `usage` object with token counts and cost by default. For streaming, the final `event: messages` payload includes the same `usage` object.
+
+To understand what's inside `usage`, see [Observability](/additional-features/observability#usage-payload).
+
+<Accordion title="Turning usage tracking on/off" defaultOpen={false}>
+Usage tracking is configured on the agent (not on FastAPI).
+
+```python
+from agency_swarm import Agent, ModelSettings
+
+agent = Agent(
+    name="Assistant",
+    instructions="You are a helpful assistant.",
+    model_settings=ModelSettings(include_usage=False),
+)
+```
+
+If you're using LiteLLM models and want usage in streaming responses, keep `include_usage=True`.
+</Accordion>
+
+**Implementation:** `src/agency_swarm/integrations/fastapi_utils/endpoint_handlers.py`
+
+Additionally, you will need to provide a bearer token in the authorization if you have `"APP_TOKEN"` specified (or a differently named variable if you provided app_token_env). If the token is **not specified** in the env variables, **authentication will be disabled**.
+
+### Example: Serving Multiple Agencies and Tools
+
+```python
+from agency_swarm import Agency, Agent, function_tool, run_fastapi
+
+# Example tools using agents SDK
+@function_tool
+def example_tool(example_field: str) -> str:
+    """Example tool with input field."""
+    return f"Result of ExampleTool operation with {example_field}"
+
+@function_tool
+def test_tool(example_field: str) -> str:
+    """Test tool with input field."""
+    return f"Result of TestTool operation with {example_field}"
+
+# Create agents
+agent1 = Agent(name="Assistant1", instructions="You are assistant 1.")
+agent2 = Agent(name="Assistant2", instructions="You are assistant 2.")
+
+# Create agency factory functions for proper thread management
+def create_agency_1(load_threads_callback=None, save_threads_callback=None):
+    return Agency(
+        agent1, 
+        name="test_agency_1",
+        load_threads_callback=load_threads_callback,
+        save_threads_callback=save_threads_callback,
+    )
+
+def create_agency_2(load_threads_callback=None, save_threads_callback=None):
+    return Agency(
+        agent2, 
+        name="test_agency_2",
+        load_threads_callback=load_threads_callback,
+        save_threads_callback=save_threads_callback,
+    )
+
+run_fastapi(
+    agencies={
+        "test_agency_1": create_agency_1,
+        "test_agency_2": create_agency_2,
+    },
+    tools=[example_tool, test_tool],
+)
+```
+
+This will create the following endpoints:
+- `/test_agency_1/get_response`
+- `/test_agency_1/get_response_stream`
+- `/test_agency_1/cancel_response_stream` (standard mode only; see AG-UI note below)
+- `/test_agency_1/get_metadata`
+- `/test_agency_2/get_response`
+- `/test_agency_2/get_response_stream`
+- `/test_agency_2/cancel_response_stream` (standard mode only; see AG-UI note below)
+- `/test_agency_2/get_metadata`
+- `/tool/ExampleTool` (for BaseTools) or `/tool/example_tool` (for function tools)
+- `/tool/TestTool` (for BaseTools) or `/tool/test_tool` (for function tools)
+
+If `enable_logging=True`, a `/get_logs` endpoint is also added.
+
+Inputs for the tool endpoints will follow their respective schemas.
+
+---
+
+## API Usage Example
+
+You can interact with your agents and tools using HTTP requests. Here's an example using Python's `requests` library:
+
+```python
+import requests
+
+agency_url = "http://127.0.0.1:8000/test_agency_1/get_response"
+payload = {
+    "message": "Hello",
+}
+
+headers = {
+    "Authorization": "Bearer 123"  # Replace with your actual token if needed
+}
+
+agency_response = requests.post(agency_url, json=payload, headers=headers)
+print("Status code:", agency_response.status_code)
+print("Response:", agency_response.json())
+
+tool_url = "http://127.0.0.1:8000/tool/example_tool"
+payload = {
+    "example_field": "test",
+}
+
+tool_response = requests.post(tool_url, json=payload, headers=headers)
+print("Status code:", tool_response.status_code)
+print("Response:", tool_response.json())
+```
+
+---
+
+## Endpoint Structure
+
+- **Agency Endpoints (standard mode):**
+  Each agency is served at:
+  - `/your_agency_name/get_response` (POST)
+  - `/your_agency_name/get_response_stream` (POST, streaming responses)
+  - `/your_agency_name/cancel_response_stream` (POST, not registered when `enable_agui=True`)
+  - `/your_agency_name/get_metadata` (GET)
+
+- **Tool Endpoints:**
+  Each tool is served at:
+  - `/tool/ToolClassName` (POST) - for BaseTools
+  - `/tool/function_name` (POST) - for FunctionTools
+  - `/openapi.json` (GET) - aggregate schema for every agency and tool endpoint
+  - `/docs` and `/redoc` (GET) - interactive Swagger UI and ReDoc powered by the same OpenAPI spec
+
+- **Logging Endpoint:**
+  When `enable_logging=True`:
+  - `/get_logs` (POST)
+
+- **AG-UI Protocol:**
+  When `enable_agui=True`, only the streaming endpoint is exposed and follows the AG-UI protocol for enhanced frontend integration. The cancel endpoint is not registered in AG-UI mode.
+
+<Note>
+Stream cancellation uses an in-memory registry per process. It requires single-worker deployments (e.g., uvicorn workers=1, the default), otherwise cancel requests routed to a different worker will return 404.
+</Note>
+
+---
+
+## Cancelling Active Streams
+
+The streaming endpoint supports cancellation via two methods:
+
+### 1. Cancel Endpoint
+
+Call the cancel endpoint with the `run_id` received from the streaming response. 
+Optionally include `cancel_mode` (defaults to `immediate`):
+- `immediate` — stop right away and return messages that were fully generated; the in-progress message is discarded.
+- `after_turn` — finish the current turn, then stop.
+
+```python
+import requests
+
+# Cancel an active stream
+cancel_url = "http://127.0.0.1:8000/test_agency/cancel_response_stream"
+payload = {"run_id": "your-run-id", "cancel_mode": "after_turn"}  # cancel_mode is optional
+response = requests.post(cancel_url, json=payload)
+# Returns: {"ok": True, "run_id": "...", "cancelled": True, "cancel_mode": "after_turn", "new_messages": [...]}
+```
+
+### 2. Automatic Cancellation on Disconnect
+
+When a client disconnects (tab close, refresh, network failure), the stream is automatically cancelled.
+
+### Streaming Response with run_id
+
+The streaming endpoint sends a `meta` event first containing the `run_id`:
+
+```
+event: meta
+data: {"run_id": "550e8400-e29b-41d4-a716-446655440000"}
+
+data: {"data": ...}
+data: {"data": ...}
+
+event: messages
+data: {"new_messages": [...], "run_id": "...", "cancelled": false}
+
+event: end
+data: [DONE]
+```
+
+Store the `run_id` from the `meta` event to use with the cancel endpoint.
+
+---
+
+## Inspecting Tool Schemas
+
+When integrating your tools with external systems or documenting your API, you need to expose the parameter schemas. FastAPI automatically serves `/openapi.json`, so you can point tooling (Swagger UI, ReDoc, Agencii.ai, etc.) directly at the running server. The same schema is available programmatically via `ToolFactory.get_openapi_schema()` when you want to export it without starting FastAPI. Both outputs now share the same `/tool/<ToolName>` routes, HTTP Bearer security, and validation error responses, so either endpoint can be consumed interchangeably.
+
+```python
+from agency_swarm.tools import ToolFactory
+
+tools = [MyTool, my_function_tool]
+openapi_schema = ToolFactory.get_openapi_schema(
+    tools,
+    url="https://your-server.com",
+    title="My Tools API",
+    description="OpenAPI schema for my tools"
+)
+```
+
+The method returns a JSON string containing the complete specification with all tool parameters, types, and descriptions.
+
+**Implementation:** `src/agency_swarm/tools/tool_factory.py`
+
+
+### Example: Serving Standalone Tools
+
+```python
+from agency_swarm import BaseTool, run_fastapi
+
+class Address(BaseTool):
+    street: str
+    zip_code: int
+
+    def run(self) -> str:
+        return f"{self.street} {self.zip_code}"
+
+run_fastapi(
+    tools=[Address],
+    host="0.0.0.0",
+    port=8080,
+    server_url="https://123456789098.ngrok-free.app",
+)
+```
+
+Resulting endpoints:
+
+- `POST /tool/Address` – executes the tool with full Pydantic validation (including nested models)
+- `GET /openapi.json` – full schema for agencies and tools
+- `GET /docs` / `GET /redoc` – interactive exploration powered by `/openapi.json`
+
+Pass `server_url` when your server sits behind a proxy or external domain so `/openapi.json` advertises the correct base URL.
+
+See `examples/fastapi_integration/server.py` for a complete multi-agent + tool setup.
+
+---
+
+## File Attachments
+
+When using the agency endpoints (`/{your_agency}/get_response` and `/{your_agency}/get_response_stream`), you can attach files in two ways:
+
+- Direct inline: `.pdf`, `.jpeg`, `.jpg`, `.gif`, `.png`
+- Via `file_ids` / `file_urls` (processed, not inline): `.c`, `.cs`, `.cpp`, `.csv`, `.html`, `.java`, `.json`, `.php`, `.py`, `.rb`, `.css`, `.js`, `.sh`, `.ts`, `.pkl`, `.tar`, `.xlsx`, `.xml`, `.zip`, `.doc`, `.docx`, `.md`, `.pptx`, `.tex`, `.txt`
+- Rejected: `.go` and any extension not listed above
+- Payload fields: `file_ids: string[]` OR `file_urls: { filename: url }`
+
+Behavior with `file_urls`:
+- The server downloads each URL, uploads it to OpenAI, waits until processed, and uses the resulting File IDs.
+- `file_ids_map` (shape: `{ filename: file_id }`) is returned in the non‑streaming JSON response of `POST /get_response` and in the final `event: messages` SSE payload of `POST /get_response_stream`.
