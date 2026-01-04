@@ -1,0 +1,12 @@
+# Agency Swarm Web Backend Dependencies
+
+# Core framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.32.0
+
+# Agency Swarm (install from source)
+# In development, use: pip install -e /path/to/agency-swarm
+
+# Utilities
+pydantic>=2.0.0
+python-dotenv>=1.0.0
