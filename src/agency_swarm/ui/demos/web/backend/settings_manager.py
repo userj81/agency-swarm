@@ -8,14 +8,17 @@ and agent-specific settings with AES-256-GCM encryption.
 import base64
 import json
 import os
-from datetime import datetime, timezone
+from datetime import datetime, timezone  # type: ignore[import]
 from pathlib import Path
-from typing import Any, Dict, Optional
+from typing import Any
 
+# Use timezone.utc instead of UTC for compatibility
+UTC = timezone.utc
+
+from cryptography.fernet import Fernet
+from cryptography.hazmat.backends import default_backend
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
-from cryptography.hazmat.backends import default_backend
-from cryptography.fernet import Fernet
 
 
 class SettingsManager:
@@ -31,7 +34,7 @@ class SettingsManager:
 
     VERSION = "1.0"
 
-    def __init__(self, settings_dir: Optional[Path] = None):
+    def __init__(self, settings_dir: Path | None = None):
         """
         Initialize the settings manager.
 
@@ -46,8 +49,8 @@ class SettingsManager:
         self.settings_dir.mkdir(parents=True, exist_ok=True)
 
         self.settings_file = self.settings_dir / "settings.json"
-        self._fernet: Optional[Fernet] = None
-        self._cached_settings: Optional[Dict[str, Any]] = None
+        self._fernet: Fernet | None = None
+        self._cached_settings: dict[str, Any] | None = None
         self._is_encrypted = False
 
     def _derive_key(self, password: str, salt: bytes) -> bytes:
@@ -71,7 +74,7 @@ class SettingsManager:
         key = base64.urlsafe_b64encode(kdf.derive(password.encode()))
         return key
 
-    def _create_default_settings(self) -> Dict[str, Any]:
+    def _create_default_settings(self) -> dict[str, Any]:
         """
         Create default settings structure.
 
@@ -80,8 +83,8 @@ class SettingsManager:
         """
         return {
             "version": self.VERSION,
-            "created_at": datetime.now(timezone.utc).isoformat(),
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "created_at": datetime.now(UTC).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             "encryption": {
                 "algorithm": "AES-256-GCM",
                 "salt": None,
@@ -99,7 +102,7 @@ class SettingsManager:
             "agent_overrides": {}
         }
 
-    def load_settings(self, password: Optional[str] = None) -> Dict[str, Any]:
+    def load_settings(self, password: str | None = None) -> dict[str, Any]:
         """
         Load settings from disk, decrypting if password is provided.
 
@@ -119,7 +122,7 @@ class SettingsManager:
             self._cached_settings = settings
             return settings
 
-        with open(self.settings_file, "r") as f:
+        with open(self.settings_file) as f:
             data = json.load(f)
 
         # Check if settings are encrypted
@@ -166,8 +169,8 @@ class SettingsManager:
 
     def save_settings(
         self,
-        settings: Dict[str, Any],
-        password: Optional[str] = None
+        settings: dict[str, Any],
+        password: str | None = None
     ) -> None:
         """
         Save settings to disk, encrypting if password is provided.
@@ -180,7 +183,7 @@ class SettingsManager:
             ValueError: If trying to encrypt without password
         """
         # Update timestamp
-        settings["updated_at"] = datetime.now(timezone.utc).isoformat()
+        settings["updated_at"] = datetime.now(UTC).isoformat()
 
         # Create a copy to avoid modifying the input
         data_to_save = json.loads(json.dumps(settings))
@@ -245,7 +248,7 @@ class SettingsManager:
 
         for k in keys:
             if isinstance(value, dict):
-                value = value.get(k)
+                value = value.get(k, default)
             else:
                 return default
 
@@ -272,7 +275,7 @@ class SettingsManager:
 
         settings[keys[-1]] = value
 
-    def get_api_key(self, provider: str) -> Optional[str]:
+    def get_api_key(self, provider: str) -> str | None:
         """
         Get API key for a provider.
 
@@ -289,7 +292,7 @@ class SettingsManager:
         provider_data = api_keys.get(provider, {})
         return provider_data.get("key")
 
-    def set_api_key(self, provider: str, key: str, metadata: Optional[Dict] = None) -> None:
+    def set_api_key(self, provider: str, key: str, metadata: dict | None = None) -> None:
         """
         Set API key for a provider.
 
@@ -306,15 +309,15 @@ class SettingsManager:
 
         self._cached_settings["api_keys"][provider] = {
             "key": key,
-            "updated_at": datetime.now(timezone.utc).isoformat(),
+            "updated_at": datetime.now(UTC).isoformat(),
             **(metadata or {})
         }
 
-    def get_model_config(self) -> Dict[str, Any]:
+    def get_model_config(self) -> dict[str, Any]:
         """Get current model configuration."""
         return self.get_setting("model_config", {})
 
-    def update_model_config(self, config: Dict[str, Any]) -> None:
+    def update_model_config(self, config: dict[str, Any]) -> None:
         """
         Update model configuration.
 
@@ -329,7 +332,7 @@ class SettingsManager:
 
         self._cached_settings["model_config"].update(config)
 
-    def get_agent_override(self, agent_name: str) -> Optional[Dict[str, Any]]:
+    def get_agent_override(self, agent_name: str) -> dict[str, Any] | None:
         """
         Get model override for a specific agent.
 
@@ -345,7 +348,7 @@ class SettingsManager:
         overrides = self._cached_settings.get("agent_overrides", {})
         return overrides.get(agent_name)
 
-    def set_agent_override(self, agent_name: str, config: Dict[str, Any]) -> None:
+    def set_agent_override(self, agent_name: str, config: dict[str, Any]) -> None:
         """
         Set model override for a specific agent.
 
@@ -377,7 +380,7 @@ class SettingsManager:
 
 
 # Global settings manager instance
-_settings_manager: Optional[SettingsManager] = None
+_settings_manager: SettingsManager | None = None
 
 
 def get_settings_manager() -> SettingsManager:

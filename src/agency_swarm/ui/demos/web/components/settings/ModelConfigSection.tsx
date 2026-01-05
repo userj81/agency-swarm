@@ -50,7 +50,7 @@ const MODEL_OPTIONS = [
 
 export default function ModelConfigSection() {
   const { settings, updateModelConfig } = useSettings();
-  const config = settings?.model_config;
+  const config = settings?.model_config_data;
 
   if (!config) return null;
 

@@ -9,36 +9,39 @@ import asyncio
 import json
 import os
 import sys
-import uuid
-from datetime import datetime, timezone
+from collections.abc import AsyncGenerator
+from datetime import datetime, timezone  # type: ignore[import]
 from pathlib import Path
-from typing import Any, AsyncGenerator
+from typing import Any
+
+# Use timezone.utc instead of UTC for compatibility
+UTC = timezone.utc
 
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
-from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
-from typing import List, Set
 
 # Add agency_swarm to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
 
+import httpx
+from backend.settings_manager import get_settings_manager
+
 from agency_swarm import Agency, Agent
+from agency_swarm.tools.concurrency_v2 import (
+    DeadlockResolutionStrategy,
+    get_global_concurrency_manager,
+)
 from agency_swarm.ui.demos.launcher import TerminalDemoLauncher
 from agency_swarm.ui.demos.persistence import (
     list_chat_records,
-    save_current_chat,
     load_chat,
     load_chat_metadata,
+    save_current_chat,
 )
-from agency_swarm.utils.usage_tracking import UsageStats, extract_usage_from_run_result, calculate_usage_with_cost
-from agency_swarm.tools.concurrency_v2 import (
-    get_global_concurrency_manager,
-    DeadlockResolutionStrategy,
-)
-from backend.settings_manager import get_settings_manager, SettingsManager
-import httpx
+from agency_swarm.utils.usage_tracking import UsageStats, calculate_usage_with_cost, extract_usage_from_run_result
 
 # ============================================================================
 # Configuration
@@ -130,7 +133,7 @@ class OverrideLockRequest(BaseModel):
 
 
 class ResolveDeadlockRequest(BaseModel):
-    cycle: List[str]
+    cycle: list[str]
     strategy: str = "priority"  # priority, youngest, oldest, random, manual
     victim_lock_id: str | None = None
 
@@ -144,7 +147,7 @@ class APIData(BaseModel):
     key: str
     validated: bool = False
     last_validated: str | None = None
-    models: List[str] = []
+    models: list[str] = []
 
 
 class ModelConfig(BaseModel):
@@ -169,8 +172,10 @@ class SettingsData(BaseModel):
     updated_at: str
     encryption: dict
     api_keys: dict
-    model_config: ModelConfig
+    model_config_data: ModelConfig
     agent_overrides: dict
+
+    model_config = {"extra": "allow"}  # type: ignore[assignment]
 
 
 class UnlockSettingsRequest(BaseModel):
@@ -187,7 +192,7 @@ class ValidateKeyResponse(BaseModel):
     provider: str
     message: str
     error: str | None = None
-    models: List[str] = []
+    models: list[str] = []
 
 
 # ============================================================================
@@ -198,7 +203,7 @@ class ConnectionManager:
     """Manages WebSocket connections for real-time concurrency updates."""
 
     def __init__(self):
-        self.active_connections: List[WebSocket] = []
+        self.active_connections: list[WebSocket] = []
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
@@ -252,7 +257,7 @@ def setup_concurrency_websocket():
 @app.get("/health")
 async def health_check():
     """Health check endpoint."""
-    return {"status": "healthy", "timestamp": datetime.now(timezone.utc).isoformat()}
+    return {"status": "healthy", "timestamp": datetime.now(UTC).isoformat()}
 
 
 @app.get("/agents")
@@ -296,7 +301,7 @@ async def chat(request: SendMessageRequest):
     # Set or validate chat ID
     _current_chat_id = chat_id
 
-    async def stream_response() -> AsyncGenerator[str, None]:
+    async def stream_response() -> AsyncGenerator[str]:
         """Stream events to the frontend."""
         try:
             # Get the response stream
@@ -327,7 +332,7 @@ async def chat(request: SendMessageRequest):
                     yield f"data: {json.dumps({'type': 'usage', 'data': _session_usage.__dict__})}\n\n"
 
             # Save chat
-            save_current_chat(agency, chat_id, usage=_session_usage.__dict__ if _session_usage else None)
+            save_current_chat(agency, chat_id, usage=_session_usage.__dict__ if _session_usage else None)  # type: ignore[arg-type]
 
             yield "data: [DONE]\n\n"
 
@@ -439,7 +444,7 @@ async def execute_command(request: CommandRequest):
     except HTTPException:
         raise
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.get("/chats")
@@ -558,9 +563,9 @@ async def get_settings(request: Request):
         settings = manager.load_settings(password)
         return settings
     except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=401, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.put("/settings")
@@ -587,9 +592,9 @@ async def update_settings(request: Request):
             "message": "Settings saved and agency reloaded successfully"
         }
     except ValueError as e:
-        raise HTTPException(status_code=401, detail=str(e))
+        raise HTTPException(status_code=401, detail=str(e)) from e
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/settings/unlock")
@@ -615,7 +620,7 @@ async def unlock_settings(request: UnlockSettingsRequest):
             "is_encrypted": True
         }
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=str(e)) from e
 
 
 @app.post("/settings/validate")
@@ -934,7 +939,7 @@ async def concurrency_websocket(websocket: WebSocket):
 
     except WebSocketDisconnect:
         ws_manager.disconnect(websocket)
-    except Exception as e:
+    except Exception:
         ws_manager.disconnect(websocket)
         raise
 

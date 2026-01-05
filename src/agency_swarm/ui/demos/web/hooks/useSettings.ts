@@ -256,8 +256,8 @@ export function useSettings(options: UseSettingsOptions = {}): UseSettingsResult
 
       const updated = {
         ...prev,
-        model_config: {
-          ...prev.model_config,
+        model_config_data: {
+          ...prev.model_config_data,
           ...config,
         },
       };

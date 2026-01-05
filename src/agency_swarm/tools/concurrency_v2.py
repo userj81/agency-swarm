@@ -344,7 +344,7 @@ class ConflictPatternDetector:
     def record_conflict(self, agent_a: str, agent_b: str, resolution_time: float):
         """Record a conflict between two agents."""
         # Normalize key (alphabetical order)
-        key = tuple(sorted([agent_a, agent_b]))
+        key: tuple[str, str] = tuple(sorted([agent_a, agent_b]))  # type: ignore[assignment]
 
         with self._lock:
             self.conflict_matrix[key] = self.conflict_matrix.get(key, 0) + 1
@@ -380,7 +380,7 @@ class ConflictPatternDetector:
 
     def get_conflict_count(self, agent_a: str, agent_b: str) -> int:
         """Get conflict count between two specific agents."""
-        key = tuple(sorted([agent_a, agent_b]))
+        key: tuple[str, str] = tuple(sorted([agent_a, agent_b]))  # type: ignore[assignment]
         return self.conflict_matrix.get(key, 0)
 
 
@@ -635,7 +635,8 @@ class GlobalConcurrencyManager:
                     execution_stage=ExecutionStage.ACQUIRED,
                 )
 
-                self.locks_by_agent[lock_key] = next_lock
+                if lock_key is not None:
+                    self.locks_by_agent[lock_key] = next_lock
 
                 # Record acquisition event
                 self.event_manager.record_lock_event(LockEvent(
@@ -649,7 +650,8 @@ class GlobalConcurrencyManager:
                 ))
             else:
                 # No waiting agents, remove lock
-                del self.locks_by_agent[lock_key]
+                if lock_key is not None:
+                    del self.locks_by_agent[lock_key]
 
         # Record release event
         self.event_manager.record_lock_event(LockEvent(

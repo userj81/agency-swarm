@@ -302,7 +302,7 @@ export interface SettingsData {
   updated_at: string;
   encryption: SettingsEncryption;
   api_keys: Record<string, APIData>;
-  model_config: ModelConfig;
+  model_config_data: ModelConfig;
   agent_overrides: Record<string, AgentModelOverride>;
 }
 
