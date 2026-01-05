@@ -15,10 +15,11 @@ from pathlib import Path
 from typing import Any, AsyncGenerator
 
 import uvicorn
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.responses import StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import List, Set
 
 # Add agency_swarm to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent.parent))
@@ -32,6 +33,12 @@ from agency_swarm.ui.demos.persistence import (
     load_chat_metadata,
 )
 from agency_swarm.utils.usage_tracking import UsageStats, extract_usage_from_run_result, calculate_usage_with_cost
+from agency_swarm.tools.concurrency_v2 import (
+    get_global_concurrency_manager,
+    DeadlockResolutionStrategy,
+)
+from backend.settings_manager import get_settings_manager, SettingsManager
+import httpx
 
 # ============================================================================
 # Configuration
@@ -112,6 +119,130 @@ class CommandRequest(BaseModel):
 
 class NewChatRequest(BaseModel):
     chat_id: str | None = None
+
+
+# ============================================================================
+# Concurrency Models
+# ============================================================================
+
+class OverrideLockRequest(BaseModel):
+    reason: str
+
+
+class ResolveDeadlockRequest(BaseModel):
+    cycle: List[str]
+    strategy: str = "priority"  # priority, youngest, oldest, random, manual
+    victim_lock_id: str | None = None
+
+
+# ============================================================================
+# Settings Models
+# ============================================================================
+
+class APIData(BaseModel):
+    provider: str
+    key: str
+    validated: bool = False
+    last_validated: str | None = None
+    models: List[str] = []
+
+
+class ModelConfig(BaseModel):
+    default_model: str = "gpt-4o-mini"
+    temperature: float = 0.7
+    max_tokens: int = 2048
+    top_p: float = 1.0
+    frequency_penalty: float = 0.0
+    presence_penalty: float = 0.0
+
+
+class AgentModelOverride(BaseModel):
+    agent_name: str
+    model: str | None = None
+    temperature: float | None = None
+    max_tokens: int | None = None
+
+
+class SettingsData(BaseModel):
+    version: str
+    created_at: str
+    updated_at: str
+    encryption: dict
+    api_keys: dict
+    model_config: ModelConfig
+    agent_overrides: dict
+
+
+class UnlockSettingsRequest(BaseModel):
+    password: str
+
+
+class ValidateKeyRequest(BaseModel):
+    provider: str
+    key: str
+
+
+class ValidateKeyResponse(BaseModel):
+    valid: bool
+    provider: str
+    message: str
+    error: str | None = None
+    models: List[str] = []
+
+
+# ============================================================================
+# WebSocket Connection Manager
+# ============================================================================
+
+class ConnectionManager:
+    """Manages WebSocket connections for real-time concurrency updates."""
+
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        """Broadcast a message to all connected clients."""
+        disconnected = []
+        for connection in self.active_connections:
+            try:
+                await connection.send_json(message)
+            except Exception:
+                disconnected.append(connection)
+
+        # Remove disconnected clients
+        for conn in disconnected:
+            self.disconnect(conn)
+
+    async def send_personal(self, message: dict, websocket: WebSocket):
+        await websocket.send_json(message)
+
+
+ws_manager = ConnectionManager()
+
+
+def setup_concurrency_websocket():
+    """Setup WebSocket event callback for concurrency updates."""
+    manager = get_global_concurrency_manager()
+
+    def event_callback(event: dict):
+        """Forward concurrency events to WebSocket clients."""
+        # This runs in a thread, need to schedule async broadcast
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                loop.create_task(ws_manager.broadcast(event))
+        except Exception:
+            pass  # Event loop not available
+
+    manager.register_event_callback(event_callback)
 
 
 # ============================================================================
@@ -379,6 +510,433 @@ async def delete_chat(chat_id: str):
         return {"success": True, "message": f"Deleted chat {chat_id}"}
 
     raise HTTPException(status_code=404, detail=f"Chat {chat_id} not found")
+
+
+# ============================================================================
+# Settings API Routes
+# ============================================================================
+
+def _reload_agency_with_settings(settings: dict) -> None:
+    """
+    Reload the agency with new settings.
+
+    Updates environment variables and recreates the agency instance.
+    """
+    global _agency
+
+    # Update environment variables with API keys
+    api_keys = settings.get("api_keys", {})
+    for provider, key_data in api_keys.items():
+        if isinstance(key_data, dict) and "key" in key_data:
+            key = key_data["key"]
+            provider_upper = provider.upper()
+
+            if provider_upper == "OPENAI":
+                os.environ["OPENAI_API_KEY"] = key
+            elif provider_upper == "ANTHROPIC":
+                os.environ["ANTHROPIC_API_KEY"] = key
+            elif provider_upper == "GOOGLE":
+                os.environ["GOOGLE_API_KEY"] = key
+            elif provider_upper == "COHERE":
+                os.environ["COHERE_API_KEY"] = key
+
+    # Recreate agency with new settings
+    _agency = None  # Reset to force reload on next get_agency() call
+
+
+@app.get("/settings")
+async def get_settings(request: Request):
+    """
+    Get current settings.
+
+    If settings are encrypted, password must be provided via X-Password header.
+    """
+    password = request.headers.get("X-Password")
+
+    try:
+        manager = get_settings_manager()
+        settings = manager.load_settings(password)
+        return settings
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.put("/settings")
+async def update_settings(request: Request):
+    """
+    Update settings and reload the agency.
+
+    If settings are encrypted, password must be provided via X-Password header.
+    """
+    password = request.headers.get("X-Password")
+
+    try:
+        settings_data = await request.json()
+
+        manager = get_settings_manager()
+        manager.load_settings(password)  # Load first to get current state
+        manager.save_settings(settings_data, password)
+
+        # Reload agency with new settings
+        _reload_agency_with_settings(settings_data)
+
+        return {
+            "success": True,
+            "message": "Settings saved and agency reloaded successfully"
+        }
+    except ValueError as e:
+        raise HTTPException(status_code=401, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/settings/unlock")
+async def unlock_settings(request: UnlockSettingsRequest):
+    """
+    Unlock encrypted settings with password.
+
+    Returns the decrypted settings if password is correct.
+    """
+    try:
+        manager = get_settings_manager()
+        settings = manager.load_settings(request.password)
+
+        return {
+            "success": True,
+            "data": settings,
+            "is_encrypted": manager.is_encrypted()
+        }
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "is_encrypted": True
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/settings/validate")
+async def validate_api_key(request: ValidateKeyRequest):
+    """
+    Validate an API key by making a test request to the provider.
+
+    Returns validation result and available models if successful.
+    """
+    provider = request.provider.lower()
+    key = request.key
+
+    try:
+        if provider == "openai":
+            return await _validate_openai_key(key)
+        elif provider == "anthropic":
+            return await _validate_anthropic_key(key)
+        elif provider == "google":
+            return await _validate_google_key(key)
+        elif provider == "cohere":
+            return await _validate_cohere_key(key)
+        else:
+            return ValidateKeyResponse(
+                valid=False,
+                provider=request.provider,
+                message=f"Unsupported provider: {provider}",
+                error=f"Provider '{provider}' is not supported"
+            )
+    except Exception as e:
+        return ValidateKeyResponse(
+            valid=False,
+            provider=request.provider,
+            message="Validation failed",
+            error=str(e)
+        )
+
+
+async def _validate_openai_key(key: str) -> ValidateKeyResponse:
+    """Validate OpenAI API key and fetch available models."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.openai.com/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                models = [
+                    m["id"] for m in data.get("data", [])
+                    if m["id"].startswith(("gpt-", "o1-", "o3-"))
+                ]
+
+                return ValidateKeyResponse(
+                    valid=True,
+                    provider="openai",
+                    message="API key is valid",
+                    models=sorted(models)
+                )
+            else:
+                return ValidateKeyResponse(
+                    valid=False,
+                    provider="openai",
+                    message="Invalid API key",
+                    error=f"HTTP {response.status_code}"
+                )
+    except Exception as e:
+        return ValidateKeyResponse(
+            valid=False,
+            provider="openai",
+            message="Validation failed",
+            error=str(e)
+        )
+
+
+async def _validate_anthropic_key(key: str) -> ValidateKeyResponse:
+    """Validate Anthropic API key."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json"
+                },
+                json={
+                    "model": "claude-3-haiku-20240307",
+                    "max_tokens": 1,
+                    "messages": [{"role": "user", "content": "."}]
+                },
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                return ValidateKeyResponse(
+                    valid=True,
+                    provider="anthropic",
+                    message="API key is valid",
+                    models=["claude-3-opus-20240229", "claude-3-sonnet-20240229", "claude-3-haiku-20240307"]
+                )
+            elif response.status_code == 401:
+                return ValidateKeyResponse(
+                    valid=False,
+                    provider="anthropic",
+                    message="Invalid API key",
+                    error="Unauthorized"
+                )
+            else:
+                return ValidateKeyResponse(
+                    valid=False,
+                    provider="anthropic",
+                    message="Validation failed",
+                    error=f"HTTP {response.status_code}"
+                )
+    except Exception as e:
+        return ValidateKeyResponse(
+            valid=False,
+            provider="anthropic",
+            message="Validation failed",
+            error=str(e)
+        )
+
+
+async def _validate_google_key(key: str) -> ValidateKeyResponse:
+    """Validate Google API key."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                f"https://generativelanguage.googleapis.com/v1beta/models?key={key}",
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                return ValidateKeyResponse(
+                    valid=True,
+                    provider="google",
+                    message="API key is valid",
+                    models=["gemini-pro", "gemini-pro-vision"]
+                )
+            else:
+                return ValidateKeyResponse(
+                    valid=False,
+                    provider="google",
+                    message="Invalid API key",
+                    error=f"HTTP {response.status_code}"
+                )
+    except Exception as e:
+        return ValidateKeyResponse(
+            valid=False,
+            provider="google",
+            message="Validation failed",
+            error=str(e)
+        )
+
+
+async def _validate_cohere_key(key: str) -> ValidateKeyResponse:
+    """Validate Cohere API key."""
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(
+                "https://api.cohere.ai/v1/models",
+                headers={"Authorization": f"Bearer {key}"},
+                timeout=10.0
+            )
+
+            if response.status_code == 200:
+                return ValidateKeyResponse(
+                    valid=True,
+                    provider="cohere",
+                    message="API key is valid",
+                    models=["command", "command-light", "embed-english-v2.0"]
+                )
+            else:
+                return ValidateKeyResponse(
+                    valid=False,
+                    provider="cohere",
+                    message="Invalid API key",
+                    error=f"HTTP {response.status_code}"
+                )
+    except Exception as e:
+        return ValidateKeyResponse(
+            valid=False,
+            provider="cohere",
+            message="Validation failed",
+            error=str(e)
+        )
+
+
+# ============================================================================
+# Concurrency API Routes
+# ============================================================================
+
+@app.get("/concurrency/locks")
+async def get_active_locks():
+    """Get all currently active locks."""
+    manager = get_global_concurrency_manager()
+    return {"locks": manager.get_active_locks()}
+
+
+@app.get("/concurrency/locks/{lock_id}")
+async def get_lock_details(lock_id: str):
+    """Get details of a specific lock."""
+    manager = get_global_concurrency_manager()
+    details = manager.get_lock_details(lock_id)
+    if not details:
+        raise HTTPException(status_code=404, detail=f"Lock {lock_id} not found")
+    return details
+
+
+@app.post("/concurrency/locks/{lock_id}/override")
+async def override_lock(lock_id: str, request: OverrideLockRequest):
+    """Manually override/release a lock."""
+    manager = get_global_concurrency_manager()
+    success = await manager.override_lock(lock_id, request.reason)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Lock {lock_id} not found")
+    return {"success": True, "message": f"Lock {lock_id} overridden"}
+
+
+@app.get("/concurrency/history")
+async def get_lock_history(limit: int = 100):
+    """Get lock event history."""
+    manager = get_global_concurrency_manager()
+    return {"history": manager.get_lock_history(limit)}
+
+
+@app.get("/concurrency/conflicts")
+async def get_conflicts(limit: int = 50):
+    """Get conflict history."""
+    manager = get_global_concurrency_manager()
+    return {"conflicts": manager.get_conflicts(limit)}
+
+
+@app.get("/concurrency/analytics")
+async def get_analytics(time_range: str = "1h"):
+    """Get concurrency analytics."""
+    manager = get_global_concurrency_manager()
+    return manager.get_analytics(time_range)
+
+
+@app.get("/concurrency/patterns")
+async def get_conflict_patterns(top_n: int = 10):
+    """Get conflict hotspots/patterns."""
+    manager = get_global_concurrency_manager()
+    return {"patterns": manager.get_conflict_patterns(top_n)}
+
+
+@app.post("/concurrency/deadlocks/detect")
+async def detect_deadlocks():
+    """Run deadlock detection."""
+    manager = get_global_concurrency_manager()
+    deadlocks = await manager.detect_deadlocks()
+    return {"deadlocks": [d.to_dict() for d in deadlocks]}
+
+
+@app.post("/concurrency/deadlocks/resolve")
+async def resolve_deadlock(request: ResolveDeadlockRequest):
+    """Resolve a detected deadlock."""
+    manager = get_global_concurrency_manager()
+
+    # Map strategy string to enum
+    strategy_map = {
+        "priority": DeadlockResolutionStrategy.PRIORITY_BASED,
+        "youngest": DeadlockResolutionStrategy.YOUNGEST_FIRST,
+        "oldest": DeadlockResolutionStrategy.OLDEST_FIRST,
+        "random": DeadlockResolutionStrategy.RANDOM_VICTIM,
+        "manual": DeadlockResolutionStrategy.MANUAL_INTERVENTION,
+    }
+
+    strategy = strategy_map.get(request.strategy, DeadlockResolutionStrategy.PRIORITY_BASED)
+
+    success = await manager.resolve_deadlock(
+        cycle=request.cycle,
+        strategy=strategy,
+        victim_lock_id=request.victim_lock_id,
+    )
+
+    if not success:
+        raise HTTPException(status_code=400, detail="Failed to resolve deadlock")
+
+    return {"success": True, "message": "Deadlock resolved"}
+
+
+@app.websocket("/ws/concurrency")
+async def concurrency_websocket(websocket: WebSocket):
+    """
+    WebSocket endpoint for real-time concurrency events.
+
+    Connect to receive live updates on:
+    - Lock acquisition/release
+    - Deadlock detection
+    - Conflict resolution
+    """
+    await ws_manager.connect(websocket)
+
+    # Setup event callback on first connection
+    setup_concurrency_websocket()
+
+    try:
+        # Send initial state
+        manager = get_global_concurrency_manager()
+        await websocket.send_json({
+            "type": "connected",
+            "data": {
+                "active_locks": manager.get_active_locks(),
+            }
+        })
+
+        # Keep connection alive and handle any messages
+        while True:
+            data = await websocket.receive_text()
+            # Echo back or handle client messages if needed
+            await websocket.send_json({"type": "echo", "data": data})
+
+    except WebSocketDisconnect:
+        ws_manager.disconnect(websocket)
+    except Exception as e:
+        ws_manager.disconnect(websocket)
+        raise
 
 
 # ============================================================================

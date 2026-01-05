@@ -1,20 +1,25 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
+import { useRouter } from "next/navigation";
 import ChatContainer from "@/components/ChatContainer";
 import InputArea from "@/components/InputArea";
 import Sidebar from "@/components/Sidebar";
 import CommandMenu from "@/components/CommandMenu";
 import UsagePanel from "@/components/UsagePanel";
 import AgentSelector from "@/components/AgentSelector";
+import ConcurrencyPanel from "@/components/concurrency/ConcurrencyPanel";
 import { useChat } from "@/hooks/useChat";
 import { useChats } from "@/hooks/useChats";
+import { useConcurrency } from "@/hooks/useConcurrency";
 import { type AgentInfo, type UsageStats } from "@/types";
 
 export default function HomePage() {
+  const router = useRouter();
   const [selectedAgent, setSelectedAgent] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [showUsage, setShowUsage] = useState(false);
+  const [showConcurrency, setShowConcurrency] = useState(false);
   const [showCommandMenu, setShowCommandMenu] = useState(false);
   const [commandInput, setCommandInput] = useState("");
   const chatEndRef = useRef<HTMLDivElement>(null);
@@ -38,6 +43,27 @@ export default function HomePage() {
     loadChat: loadChatRecord,
   } = useChats();
 
+  // Concurrency hook
+  const {
+    locks,
+    lockHistory,
+    conflicts,
+    deadlocks,
+    analytics,
+    patterns,
+    isConnected,
+    isLoading: concurrencyLoading,
+    refreshLocks,
+    refreshHistory,
+    refreshConflicts,
+    refreshAnalytics,
+    refreshPatterns,
+    overrideLock,
+    detectDeadlocks,
+    resolveDeadlock,
+    activeLocksCount,
+  } = useConcurrency({ enableWebSocket: true });
+
   // Auto-scroll to bottom
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -55,6 +81,7 @@ export default function HomePage() {
       if (e.key === "Escape") {
         setShowCommandMenu(false);
         setShowUsage(false);
+        setShowConcurrency(false);
       }
       // Ctrl/Cmd + / for focus input
       if ((e.ctrlKey || e.metaKey) && e.key === "/") {
@@ -143,6 +170,38 @@ export default function HomePage() {
               onAgentChange={setSelectedAgent}
             />
 
+            {/* Settings Button */}
+            <button
+              onClick={() => router.push('/settings')}
+              className="p-2 hover:bg-gray-800 rounded-lg transition-colors"
+              aria-label="Settings"
+              title="Settings"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10.325 4.317c.426-1.756 2.924-1.756 2.924 0 0 1 2.499 2.499 2.499 0 0 1 2.499-2.499zM19 13a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v6z" />
+              </svg>
+            </button>
+
+            {/* Concurrency Button */}
+            <button
+              onClick={() => setShowConcurrency(!showConcurrency)}
+              className="p-2 hover:bg-gray-800 rounded-lg transition-colors relative"
+              aria-label="Show concurrency monitor"
+              title="Concurrency Monitor"
+            >
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z" />
+              </svg>
+              {activeLocksCount > 0 && (
+                <span className="absolute -top-1 -right-1 bg-indigo-600 text-xs w-4 h-4 rounded-full flex items-center justify-center">
+                  {activeLocksCount > 9 ? "9+" : activeLocksCount}
+                </span>
+              )}
+              {isConnected && (
+                <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 bg-green-500 rounded-full border border-gray-950" />
+              )}
+            </button>
+
             {/* Usage Button */}
             <button
               onClick={() => setShowUsage(!showUsage)}
@@ -208,6 +267,29 @@ export default function HomePage() {
         <UsagePanel
           usage={usage}
           onClose={() => setShowUsage(false)}
+        />
+      )}
+
+      {/* Concurrency Panel */}
+      {showConcurrency && (
+        <ConcurrencyPanel
+          onClose={() => setShowConcurrency(false)}
+          locks={locks}
+          locksLoading={concurrencyLoading}
+          refreshLocks={refreshLocks}
+          overrideLock={overrideLock}
+          lockHistory={lockHistory}
+          refreshHistory={refreshHistory}
+          conflicts={conflicts}
+          refreshConflicts={refreshConflicts}
+          analytics={analytics}
+          refreshAnalytics={refreshAnalytics}
+          patterns={patterns}
+          refreshPatterns={refreshPatterns}
+          deadlocks={deadlocks}
+          detectDeadlocks={detectDeadlocks}
+          resolveDeadlock={resolveDeadlock}
+          isConnected={isConnected}
         />
       )}
 
