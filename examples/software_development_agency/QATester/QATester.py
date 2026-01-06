@@ -1,6 +1,5 @@
 from agency_swarm import Agent
 
-
 qa_tester = Agent(
     name="QATester",
     description=(

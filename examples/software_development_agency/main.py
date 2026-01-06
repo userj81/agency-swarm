@@ -18,12 +18,12 @@ from pathlib import Path
 # Add src directory to path for imports
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-from agency_swarm import Agency
-
 from CEO import ceo
 from Developer import developer
 from DevOpsEngineer import devops_engineer
 from QATester import qa_tester
+
+from agency_swarm import Agency
 
 
 def get_agency():

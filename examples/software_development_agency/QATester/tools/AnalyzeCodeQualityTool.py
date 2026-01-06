@@ -1,7 +1,6 @@
 import ast
 import json
 from pathlib import Path
-from typing import Any
 
 from pydantic import Field
 
@@ -76,7 +75,7 @@ class AnalyzeCodeQualityTool(BaseTool):
 
             for file_path in python_files:
                 try:
-                    with open(file_path, "r", encoding="utf-8") as f:
+                    with open(file_path, encoding="utf-8") as f:
                         content = f.read()
                         lines = content.split("\n")
 

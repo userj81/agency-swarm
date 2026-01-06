@@ -1,7 +1,6 @@
 import ast
 import json
 from pathlib import Path
-from typing import Any
 
 from pydantic import Field
 
@@ -48,7 +47,7 @@ class GenerateTestCasesTool(BaseTool):
                 }
                 return json.dumps(result, indent=2)
 
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 content = f.read()
 
             # Parse the AST
@@ -129,7 +128,7 @@ class GenerateTestCasesTool(BaseTool):
                 "test_name": f"test_{function_name}_empty_inputs",
                 "test_type": "edge_case",
                 "description": f"Test {function_name} with empty/None inputs",
-                "inputs": {arg: None for arg in args},
+                "inputs": dict.fromkeys(args),
                 "expected_output": "Handle empty inputs gracefully",
                 "setup": "",
                 "teardown": "",
@@ -156,7 +155,7 @@ class GenerateTestCasesTool(BaseTool):
                 "test_name": f"test_{function_name}_invalid_types",
                 "test_type": "error_case",
                 "description": f"Test {function_name} with invalid input types",
-                "inputs": {arg: "invalid_string" for arg in args},
+                "inputs": dict.fromkeys(args, "invalid_string"),
                 "expected_output": "TypeError or ValueError",
                 "setup": "",
                 "teardown": "",
@@ -288,9 +287,9 @@ class GenerateTestCasesTool(BaseTool):
 
         for tc in test_cases:
             code_lines.append(f"def {tc['test_name']}():")
-            code_lines.append(f'    """')
+            code_lines.append('    """')
             code_lines.append(f'    {tc["description"]}')
-            code_lines.append(f'    """')
+            code_lines.append('    """')
 
             # Add inputs as variables
             for key, value in tc["inputs"].items():
@@ -339,9 +338,9 @@ class GenerateTestCasesTool(BaseTool):
 
             for tc in cases:
                 code_lines.append(f'    def {tc["test_name"]}(self):')
-                code_lines.append(f'        """')
+                code_lines.append('        """')
                 code_lines.append(f'        {tc["description"]}')
-                code_lines.append(f'        """')
+                code_lines.append('        """')
                 code_lines.append('        # TODO: Implement test')
                 code_lines.append('        self.fail("Test not implemented")')
                 code_lines.append('')

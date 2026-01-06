@@ -233,21 +233,21 @@ class ValidateRequirementsTool(BaseTool):
                     analysis["total_functions"] += len(file_analysis["functions"])
                     analysis["total_classes"] += len(file_analysis["classes"])
 
-                except SyntaxError:
-                    pass  # Skip files with syntax errors
+                except Exception:
+                    pass  # Skip files with errors
 
-            analysis["total_lines"] += file_analysis["lines"]
-            analysis["files"].append(file_analysis)
+                analysis["total_lines"] += file_analysis["lines"]
+                analysis["files"].append(file_analysis)
 
-            # Extract potential feature names from comments and function names
-            for line in lines:
-                line_stripped = line.strip()
-                if line_stripped.startswith("# Feature:") or line_stripped.startswith("# Implements:"):
-                    feature = line_stripped.replace("# Feature:", "").replace("# Implements:", "").strip()
-                    analysis["features_found"].append(feature)
+                # Extract potential feature names from comments and function names
+                for line in lines:
+                    line_stripped = line.strip()
+                    if line_stripped.startswith("# Feature:") or line_stripped.startswith("# Implements:"):
+                        feature = line_stripped.replace("# Feature:", "").replace("# Implements:", "").strip()
+                        analysis["features_found"].append(feature)
 
             except Exception:
-                pass
+                pass  # Skip files that can't be read
 
         return analysis
 

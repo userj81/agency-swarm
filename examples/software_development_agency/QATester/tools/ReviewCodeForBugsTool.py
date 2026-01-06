@@ -55,7 +55,7 @@ class ReviewCodeForBugsTool(BaseTool):
                 }
                 return json.dumps(result, indent=2)
 
-            with open(path, "r", encoding="utf-8") as f:
+            with open(path, encoding="utf-8") as f:
                 content = f.read()
 
             lines = content.split("\n")
@@ -283,7 +283,7 @@ class ReviewCodeForBugsTool(BaseTool):
                                     "line": node.lineno,
                                     "type": "identity_comparison",
                                     "severity": "low",
-                                    "message": f"Using 'is' for literal comparison (should use == or !=)",
+                                    "message": "Using 'is' for literal comparison (should use == or !=)",
                                     "fix": f"Use == instead of is for comparing {type(left.value).__name__} values",
                                 })
 

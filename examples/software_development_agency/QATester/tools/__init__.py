@@ -1,5 +1,3 @@
-from agency_swarm.tools import BaseTool
-
 from .AnalyzeCodeQualityTool import AnalyzeCodeQualityTool
 from .GenerateCoverageReportTool import GenerateCoverageReportTool
 from .GenerateTestCasesTool import GenerateTestCasesTool

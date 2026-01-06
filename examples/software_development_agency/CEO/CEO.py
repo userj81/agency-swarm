@@ -1,6 +1,5 @@
 from agency_swarm import Agent
 
-
 ceo = Agent(
     name="CEO",
     description=(

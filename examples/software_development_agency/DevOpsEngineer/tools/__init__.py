@@ -1,5 +1,3 @@
-from agency_swarm.tools import BaseTool
-
 from .ConfigureInfrastructureTool import ConfigureInfrastructureTool
 from .DeployToEnvironmentTool import DeployToEnvironmentTool
 from .GenerateDeploymentReportTool import GenerateDeploymentReportTool
