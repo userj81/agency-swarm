@@ -93,6 +93,13 @@ async def test_send_message_pending_state_isolated_per_thread_manager():
         model_settings=ModelSettings(reasoning=Reasoning(effort="minimal")),
     )
 
+    # Mock the recipient's get_response to avoid actual API calls
+    async def mock_get_response(**kwargs):
+        from types import SimpleNamespace
+        return SimpleNamespace(final_output=f"Worker response")
+
+    recipient.get_response = mock_get_response
+
     agency_one = _make_agency(sender, recipient)
     agency_two = _make_agency(sender, recipient)
 
