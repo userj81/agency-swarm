@@ -7,6 +7,6 @@ import pytest
 # Importing agency_swarm triggers .env loading via python-dotenv
 import agency_swarm  # noqa: F401
 
-# Verify API key is loaded; fail integration tests if missing
+# Skip integration tests if API key is not available
 if not os.getenv("OPENAI_API_KEY"):
-    pytest.fail("OPENAI_API_KEY not found in environment")
+    pytest.skip("OPENAI_API_KEY not found in environment", allow_module_level=True)
